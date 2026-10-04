@@ -1,0 +1,144 @@
+name: OF Launch Deploy
+
+on:
+  push:
+    branches:
+      - master
+  workflow_dispatch:
+    inputs:
+      deploy_ref:
+        description: "Git ref to deploy (branch, tag, or commit SHA)"
+        required: false
+        default: "master"
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  group: of-launch-deploy
+  cancel-in-progress: false
+
+jobs:
+  build-and-deploy:
+    name: Build, Push, Deploy
+    runs-on: ubuntu-latest
+
+    env:
+      CODEDEPLOY_APP: ${{ secrets.OF_LAUNCH_CODEDEPLOY_APP }}
+      DEPLOYMENT_GROUP: ${{ secrets.OF_LAUNCH_DEPLOYMENT_GROUP }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.deploy_ref || github.ref }}
+
+      - name: Resolve commit
+        id: commit
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.OF_LAUNCH_CICD_ROLE }}
+          aws-region: ${{ secrets.OF_LAUNCH_REGION }}
+          role-session-name: github-actions-of-launch
+
+      - name: Login to ECR
+        run: |
+          aws ecr get-login-password --region ${{ secrets.OF_LAUNCH_REGION }} \
+            | docker login --username AWS --password-stdin ${{ secrets.OF_LAUNCH_ECR_REGISTRY }}
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push Docker image
+        run: |
+          IMAGE="${{ secrets.OF_LAUNCH_ECR_REGISTRY }}/${{ secrets.OF_LAUNCH_ECR_REPO }}:${{ steps.commit.outputs.sha }}"
+          docker buildx build --platform linux/arm64,linux/amd64 --push -t "$IMAGE" .
+          echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"
+
+      - name: Package deployment artifact
+        run: |
+          mkdir -p artifact
+          cp .codedeploy/appspec.yml artifact/
+          cp .codedeploy/docker-compose.yml artifact/
+          cp -r .codedeploy/scripts artifact/
+          chmod +x artifact/scripts/*.sh
+          echo "$IMAGE" > artifact/.image_tag
+
+          cd artifact
+          tar -czf ../deploy-${{ steps.commit.outputs.sha }}.tar.gz .
+          cd ..
+          echo "Artifact: $(ls -lh deploy-${{ steps.commit.outputs.sha }}.tar.gz)"
+
+      - name: Upload artifact to S3
+        id: upload
+        run: |
+          ARTIFACT_KEY="${{ secrets.OF_LAUNCH_ARTIFACT_PREFIX }}/deploy-${{ steps.commit.outputs.sha }}.tar.gz"
+          aws s3 cp deploy-${{ steps.commit.outputs.sha }}.tar.gz \
+            s3://${{ secrets.OF_LAUNCH_ARTIFACT_BUCKET }}/${ARTIFACT_KEY}
+          echo "artifact_key=${ARTIFACT_KEY}" >> "$GITHUB_OUTPUT"
+
+      - name: Register revision with CodeDeploy
+        run: |
+          aws deploy register-application-revision \
+            --application-name ${{ env.CODEDEPLOY_APP }} \
+            --revision "revisionType=S3,s3Location={bucket=${{ secrets.OF_LAUNCH_ARTIFACT_BUCKET }},key=${{ steps.upload.outputs.artifact_key }},bundleType=tgz}" \
+            --description "of-launch deployment from commit ${{ steps.commit.outputs.sha }}"
+
+      - name: Create CodeDeploy deployment
+        id: deploy
+        run: |
+          DEPLOYMENT_ID=$(aws deploy create-deployment \
+            --application-name "${{ env.CODEDEPLOY_APP }}" \
+            --deployment-group-name "${{ env.DEPLOYMENT_GROUP }}" \
+            --revision "revisionType=S3,s3Location={bucket=${{ secrets.OF_LAUNCH_ARTIFACT_BUCKET }},key=${{ steps.upload.outputs.artifact_key }},bundleType=tgz}" \
+            --description "GitHub Actions deployment from commit ${{ steps.commit.outputs.sha }}" \
+            --query "deploymentId" \
+            --output text 2>&1) || true
+
+          if [ -z "$DEPLOYMENT_ID" ] || [[ "$DEPLOYMENT_ID" == *"error"* ]]; then
+            echo "::error::Failed to create deployment: $DEPLOYMENT_ID"
+            exit 1
+          fi
+
+          echo "deployment_id=$DEPLOYMENT_ID" >> "$GITHUB_OUTPUT"
+          echo "Deployment ID: $DEPLOYMENT_ID"
+
+      - name: Wait for deployment to complete
+        if: steps.deploy.outputs.deployment_id != ''
+        run: |
+          DEPLOY_ID="${{ steps.deploy.outputs.deployment_id }}"
+          echo "Waiting for deployment $DEPLOY_ID..."
+          for i in {1..60}; do
+            STATUS=$(aws deploy get-deployment \
+              --deployment-id "$DEPLOY_ID" \
+              --query 'deploymentInfo.status' --output text)
+            echo "Attempt $i: Status = $STATUS"
+            if [ "$STATUS" = "Succeeded" ]; then
+              echo "Deployment completed successfully!"
+              exit 0
+            elif [ "$STATUS" = "Failed" ] || [ "$STATUS" = "Stopped" ]; then
+              echo "Deployment failed with status: $STATUS"
+              aws deploy get-deployment \
+                --deployment-id "$DEPLOY_ID" \
+                --query "deploymentInfo.errorInformation" --output table
+              exit 1
+            fi
+            sleep 10
+          done
+          echo "Deployment timed out"
+          exit 1
+
+      - name: Deployment summary
+        if: always() && steps.deploy.outputs.deployment_id != ''
+        run: |
+          aws deploy get-deployment \
+            --deployment-id "${{ steps.deploy.outputs.deployment_id }}" \
+            --query "deploymentInfo.{Status:status,StartTime:createTime,EndTime:completeTime,ErrorInfo:errorInformation}" \
+            --output table
