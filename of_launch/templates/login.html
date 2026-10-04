@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+  <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='favicon.svg') }}">
+  <title>Login - OF Launch</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/theme.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/login.css') }}">
+</head>
+
+<body>
+  <div class="login-container">
+    <div class="login-header">
+      <h2>🚀 Deploy Portal</h2>
+      <p>Please sign in to continue</p>
+    </div>
+
+    {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+    {% for category, message in messages %}
+    <div class="flash {{ category }}">{{ message }}</div>
+    {% endfor %}
+    {% endif %}
+    {% endwith %}
+
+    <form method="post" action="/login">
+      <div class="form-group">
+        <label for="username">Username</label>
+        <div class="input-icon username-icon">
+          <input type="text" id="username" name="username" required placeholder="Enter your username">
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label for="password">Password</label>
+        <div class="input-icon password-icon">
+          <input type="password" id="password" name="password" required placeholder="Enter your password">
+        </div>
+      </div>
+
+      <button type="submit" class="login-button">
+        Sign In
+      </button>
+    </form>
+  </div>
+</body>
+
+</html>

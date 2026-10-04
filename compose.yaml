@@ -1,0 +1,48 @@
+services:
+  app:
+    container_name: of-launch-app
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "5000:5000"
+    env_file:
+      - .env
+    environment:
+      DB_HOST: mysql
+    volumes:
+      - ./of_launch:/app/of_launch:ro
+      - ./config:/app/config:ro
+    restart: on-failure
+    depends_on:
+      mysql:
+        condition: service_healthy
+    networks:
+      - app
+
+  mysql:
+    image: mysql:9.4.0
+    container_name: of-launch-mysql
+    env_file:
+      - .env
+    environment:
+      MYSQL_ROOT_PASSWORD: ${DB_PASSWORD:-localdevpass}
+    ports:
+      - "3307:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "--silent"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+    networks:
+      - app
+
+volumes:
+  mysql_data: {}
+
+networks:
+  app:
+    driver: bridge

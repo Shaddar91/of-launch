@@ -1,0 +1,162 @@
+/* OF Launch dark theme: variables, animated background, base styles. */
+
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap');
+
+/* --- CSS Custom Properties --- */
+:root {
+  --space-bg: #060a1a;
+  --space-bg-alt: #0a0f2e;
+  --surface: rgba(12, 17, 40, 0.85);
+  --surface-elevated: rgba(18, 25, 55, 0.92);
+  --surface-hover: rgba(25, 35, 70, 0.95);
+  --surface-glass: rgba(15, 22, 50, 0.6);
+
+  --border: rgba(99, 179, 237, 0.12);
+  --border-hover: rgba(0, 212, 255, 0.3);
+  --border-active: rgba(0, 212, 255, 0.5);
+
+  --cyan: #00d4ff;
+  --purple: #7c3aed;
+  --blue: #3b82f6;
+  --teal: #14b8a6;
+  --pink: #ec4899;
+
+  --gradient-primary: linear-gradient(135deg, #00d4ff 0%, #7c3aed 100%);
+  --gradient-accent: linear-gradient(135deg, #3b82f6 0%, #7c3aed 100%);
+  --gradient-danger: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+  --gradient-success: linear-gradient(135deg, #10b981 0%, #059669 100%);
+  --gradient-warning: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+
+  --text-primary: #e0e8ff;
+  --text-secondary: rgba(200, 210, 240, 0.65);
+  --text-muted: rgba(160, 175, 210, 0.45);
+  --text-accent: #00d4ff;
+
+  --success: #10b981;
+  --warning: #f59e0b;
+  --danger: #ef4444;
+  --info: #3b82f6;
+
+  --glow-cyan: 0 0 20px rgba(0, 212, 255, 0.15), 0 0 40px rgba(0, 212, 255, 0.05);
+  --glow-purple: 0 0 20px rgba(124, 58, 237, 0.15), 0 0 40px rgba(124, 58, 237, 0.05);
+  --glow-card: 0 8px 32px rgba(0, 0, 0, 0.4), 0 0 0 1px var(--border);
+
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 16px;
+  --radius-xl: 20px;
+  --radius-pill: 50px;
+
+  --ease: cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* --- Animated Starfield Background --- */
+body::before,
+body::after {
+  content: '';
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: -1;
+}
+
+body::before {
+  background:
+    radial-gradient(1.5px 1.5px at 10% 15%, rgba(255,255,255,0.5), transparent),
+    radial-gradient(1px 1px at 25% 35%, rgba(255,255,255,0.3), transparent),
+    radial-gradient(1.5px 1.5px at 40% 70%, rgba(255,255,255,0.4), transparent),
+    radial-gradient(1px 1px at 55% 20%, rgba(255,255,255,0.25), transparent),
+    radial-gradient(2px 2px at 65% 55%, rgba(0,212,255,0.4), transparent),
+    radial-gradient(1px 1px at 75% 85%, rgba(255,255,255,0.3), transparent),
+    radial-gradient(1.5px 1.5px at 85% 40%, rgba(255,255,255,0.35), transparent),
+    radial-gradient(1px 1px at 90% 10%, rgba(124,58,237,0.3), transparent),
+    radial-gradient(1px 1px at 15% 80%, rgba(255,255,255,0.2), transparent),
+    radial-gradient(1.5px 1.5px at 50% 50%, rgba(0,212,255,0.3), transparent),
+    radial-gradient(1px 1px at 30% 90%, rgba(255,255,255,0.25), transparent),
+    radial-gradient(1px 1px at 70% 30%, rgba(255,255,255,0.2), transparent);
+  animation: starDrift 90s linear infinite;
+}
+
+body::after {
+  background:
+    radial-gradient(1px 1px at 5% 45%, rgba(255,255,255,0.3), transparent),
+    radial-gradient(1.5px 1.5px at 20% 60%, rgba(124,58,237,0.3), transparent),
+    radial-gradient(1px 1px at 35% 10%, rgba(255,255,255,0.2), transparent),
+    radial-gradient(1px 1px at 48% 88%, rgba(0,212,255,0.25), transparent),
+    radial-gradient(1.5px 1.5px at 60% 75%, rgba(255,255,255,0.35), transparent),
+    radial-gradient(1px 1px at 78% 15%, rgba(255,255,255,0.2), transparent),
+    radial-gradient(1px 1px at 88% 60%, rgba(124,58,237,0.2), transparent),
+    radial-gradient(1.5px 1.5px at 95% 90%, rgba(0,212,255,0.3), transparent);
+  animation: starDrift 120s linear infinite reverse;
+  opacity: 0.7;
+}
+
+@keyframes starDrift {
+  from { transform: translateY(0); }
+  to { transform: translateY(-50px); }
+}
+
+/* --- Subtle Nebula Overlay --- */
+body {
+  position: relative;
+  background:
+    radial-gradient(ellipse at 20% 50%, rgba(124,58,237,0.08) 0%, transparent 50%),
+    radial-gradient(ellipse at 80% 20%, rgba(0,212,255,0.06) 0%, transparent 50%),
+    radial-gradient(ellipse at 50% 80%, rgba(59,130,246,0.05) 0%, transparent 50%),
+    var(--space-bg);
+  background-attachment: fixed;
+}
+
+/* --- Scrollbar --- */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: var(--space-bg);
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(0, 212, 255, 0.2);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 212, 255, 0.35);
+}
+
+/* --- Selection --- */
+::selection {
+  background: rgba(0, 212, 255, 0.3);
+  color: #fff;
+}
+
+/* --- Role Badges --- */
+.role-badge {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding: 3px 10px;
+  border-radius: var(--radius-pill);
+  display: inline-block;
+}
+
+.role-admin {
+  background: rgba(245, 158, 11, 0.15);
+  color: var(--warning);
+  border: 1px solid rgba(245, 158, 11, 0.3);
+}
+
+.role-prod {
+  background: rgba(239, 68, 68, 0.15);
+  color: var(--danger);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+}
+
+.role-shared {
+  background: rgba(0, 212, 255, 0.12);
+  color: var(--cyan);
+  border: 1px solid rgba(0, 212, 255, 0.25);
+}

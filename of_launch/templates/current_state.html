@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='favicon.svg') }}">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Current State - OF Launch</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/theme.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/current_state.css') }}">
+</head>
+
+<body>
+  <!-- Top Navigation -->
+  <nav class="top-nav">
+    <div class="nav-container">
+      <div class="nav-brand">
+        <h1>🚀 Deploy Portal</h1>
+      </div>
+      <div class="nav-links">
+        <a href="/" class="nav-item">Deploy</a>
+        <a href="/current-state" class="nav-item active">Current State</a>
+        <a href="/deployment-history" class="nav-item">History</a>
+        <div class="user-menu">
+          <span class="username">{{ session.get('username', 'User') }}</span>
+          <span class="role-badge {% if session.get('role') == 'admin' %}role-admin{% elif session.get('role') == 'production-executor' %}role-prod{% else %}role-shared{% endif %}">{{ session.get('role', 'shared-executor') }}</span>
+          <a href="/logout" class="logout-btn">Logout</a>
+        </div>
+      </div>
+    </div>
+  </nav>
+
+  <div class="container">
+    <div class="header">
+      <div class="header-content">
+        <div class="header-text">
+          <h2>🎯 Current State</h2>
+          <p>Real-time view of what's currently active in your ECS clusters</p>
+        </div>
+        <div class="header-actions">
+          <div class="last-updated">
+            <div class="status-indicator online"></div>
+            <span id="last-updated-time">Last updated: just now</span>
+          </div>
+          <button class="btn btn-secondary" onclick="refreshData()">
+            🔄 Refresh
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <div class="filters">
+      <div class="filter-dropdown">
+        <span class="filter-label">Environment:</span>
+        <select class="dropdown-select" id="environment-filter" onchange="onEnvironmentChange()">
+          <option value="">Select Environment</option>
+          {% for env in available_environments %}
+          <option value="{{ env }}" {% if request.args.get('environment')==env %}selected{% endif %}>{{ env }}
+          </option>
+          {% endfor %}
+        </select>
+      </div>
+    </div>
+
+    <div id="loading" class="loading" style="display: none;">
+      <div class="spinner"></div>
+      Fetching current state from ECS clusters...
+    </div>
+
+    <div id="services-container">
+      <!-- Services will be rendered here by JavaScript -->
+    </div>
+  </div>
+
+  <!-- Pass Flask data to JavaScript and load external script -->
+  <script>
+    // Pass Flask data to external JavaScript file
+    document.addEventListener('DOMContentLoaded', function() {
+      const currentDeployments = JSON.parse('{{ current_deployments| tojson | safe }}');
+      const availableEnvironments = JSON.parse('{{ available_environments| tojson | safe }}');
+      
+      // Initialize the external JavaScript with Flask data
+      if (typeof initializeFlaskData === 'function') {
+        initializeFlaskData(currentDeployments, availableEnvironments);
+      }
+    });
+  </script>
+  
+  <!-- External JavaScript file -->
+  <script src="{{ url_for('static', filename='js/current_state.js') }}"></script>
+</body>
+
+</html>
+

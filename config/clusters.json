@@ -1,0 +1,43 @@
+{
+  "clusters": {
+    "of": {
+      "display_name": "OF cluster",
+      "argocd_url_env": "ARGOCD_OF_URL",
+      "argocd_token_env": "ARGOCD_OF_TOKEN",
+      "environments": ["production"],
+      "services": {
+        "frontend": {
+          "of-web": {
+            "display_name": "OF Web (SPA)",
+            "artifact_prefix": "{environment}/of-web",
+            "deploy_bucket": "${OF_WEB_DEPLOY_BUCKET}",
+            "cloudfront_id": "${OF_WEB_CLOUDFRONT_ID}"
+          }
+        },
+        "eks": {
+          "of-api": {
+            "display_name": "OF API (Flask)",
+            "ecr_repo": "of-api",
+            "helm_repo": "of-helm",
+            "helm_branch": "master",
+            "values_file": "charts/of-api/values.yaml",
+            "image_tag_key": "tag",
+            "argocd_app": "of-api"
+          }
+        },
+        "worker": {},
+        "cron": {}
+      }
+    }
+  },
+  "dependencies": {
+    "backend_deploy": {
+      "description": "Deploying backend code auto-selects the services that share its codebase",
+      "always": ["of-api"],
+      "deploy_first": null,
+      "worker_environments": [],
+      "cron_environments": []
+    }
+  },
+  "artifact_bucket": "${OF_ARTIFACT_BUCKET}"
+}

@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='favicon.svg') }}">
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OF Launch - Deployment Dashboard</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/theme.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/deploy.css') }}">
+</head>
+<body>
+    <nav class="navbar navbar-dark bg-dark">
+        <div class="container-fluid">
+            <span class="navbar-brand mb-0 h1">OF Launch - Deployment Dashboard</span>
+            <div class="d-flex align-items-center">
+                <span class="text-light me-3">{{ username }} <small class="badge bg-{% if role == 'admin' %}warning{% elif role == 'production-executor' %}danger{% else %}info{% endif %} ms-1">{{ role }}</small></span>
+                <a href="/status/" class="btn btn-outline-light btn-sm me-2">Status</a>
+                <a href="/deployment-history" class="btn btn-outline-light btn-sm me-2">History</a>
+                {% if role == 'admin' %}<a href="/admin/users" class="btn btn-outline-warning btn-sm me-2">Users</a>{% endif %}
+                <a href="/logout" class="btn btn-outline-danger btn-sm">Logout</a>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container mt-4">
+        <div id="flash-messages">
+            {% with messages = get_flashed_messages(with_categories=true) %}
+                {% if messages %}
+                    {% for category, message in messages %}
+                    <div class="alert alert-{{ 'success' if category == 'success' else 'danger' }} alert-dismissible fade show">
+                        {{ message }}
+                        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                    </div>
+                    {% endfor %}
+                {% endif %}
+            {% endwith %}
+        </div>
+
+        {% if mock_mode %}
+        <div class="alert alert-info d-flex align-items-center mb-3">
+            <strong class="me-2">LOCAL DEV MODE</strong>
+            All AWS calls are mocked. No real deployments will be triggered.
+        </div>
+        {% endif %}
+
+        <div class="card mb-4">
+            <div class="card-header bg-primary text-white">
+                <h5 class="mb-0">1. Select Environment</h5>
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-6">
+                        <label for="env-select" class="form-label fw-bold">Environment</label>
+                        <select id="env-select" class="form-select">
+                            <option value="">-- Select Environment --</option>
+                        </select>
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label fw-bold">Cluster</label>
+                        <div class="form-control-plaintext text-light" id="cluster-name">-</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="card mb-4" id="services-card" style="display: none;">
+            <div class="card-header bg-primary text-white">
+                <h5 class="mb-0">2. Select Services to Deploy</h5>
+            </div>
+            <div class="card-body" id="services-container">
+                <div class="text-center text-muted py-3" id="services-loading" style="display: none;">
+                    <div class="spinner-border spinner-border-sm me-2" role="status"></div>
+                    Loading services...
+                </div>
+                <div id="services-list"></div>
+                <div class="alert alert-warning mt-3 mb-0" id="dependency-info" style="display: none;"></div>
+            </div>
+        </div>
+
+        <div class="card mb-4" id="artifacts-card" style="display: none;">
+            <div class="card-header bg-primary text-white">
+                <h5 class="mb-0">3. Select Versions</h5>
+            </div>
+            <div class="card-body" id="artifacts-container"></div>
+        </div>
+
+        <div class="card mb-4" id="deploy-card" style="display: none;">
+            <div class="card-body text-center">
+                <button id="deploy-btn" class="btn btn-success btn-lg px-5" onclick="triggerDeploy()">
+                    Deploy Selected Services
+                </button>
+            </div>
+        </div>
+
+        <div class="card mb-4" id="result-card" style="display: none;">
+            <div class="card-header bg-success text-white">
+                <h5 class="mb-0">Deployment Result</h5>
+            </div>
+            <div class="card-body" id="result-container"></div>
+        </div>
+    </div>
+
+    <div class="modal fade" id="confirmModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header bg-danger text-white">
+                    <h5 class="modal-title">Production Deployment Confirmation</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body" id="confirm-body">
+                    <p class="fw-bold">You are about to deploy to PRODUCTION.</p>
+                    <div id="confirm-details"></div>
+                    <p class="mt-3 text-danger">Are you sure you want to proceed?</p>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="button" class="btn btn-danger" id="confirm-deploy-btn">Yes, Deploy to Production</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="{{ url_for('static', filename='js/deploy.js') }}"></script>
+</body>
+</html>

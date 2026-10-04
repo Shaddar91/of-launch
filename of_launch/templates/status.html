@@ -1,0 +1,631 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='favicon.svg') }}">
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OF Launch - Deployment Status</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/theme.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/deploy.css') }}">
+</head>
+<body>
+    <nav class="navbar navbar-dark bg-dark">
+        <div class="container-fluid">
+            <span class="navbar-brand mb-0 h1">OF Launch - Deployment Status</span>
+            <div class="d-flex align-items-center">
+                <span class="auto-refresh-indicator text-light me-3" id="refresh-indicator">
+                    Auto-refresh: <span id="refresh-countdown">10</span>s
+                </span>
+                <a href="/deploy" class="btn btn-outline-light btn-sm me-2">Deploy</a>
+                <a href="/deployment-history" class="btn btn-outline-light btn-sm me-2">History</a>
+                <a href="/logout" class="btn btn-outline-danger btn-sm">Logout</a>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container mt-4">
+        {% if mock_mode %}
+        <div class="alert alert-info d-flex align-items-center mb-3">
+            <strong class="me-2">LOCAL DEV MODE</strong>
+            All statuses are mocked. No real ArgoCD or AWS connections.
+        </div>
+        {% endif %}
+
+        <!-- Batch Deployments -->
+        <div class="card mb-4">
+            <div class="card-header bg-dark text-white d-flex justify-content-between align-items-center">
+                <h5 class="mb-0">Batch Deployments (Orchestrated)</h5>
+                <button class="btn btn-sm btn-outline-light" onclick="loadBatches()">Refresh</button>
+            </div>
+            <div class="card-body" id="batch-deployments">
+                <div class="text-center text-muted py-3">
+                    <div class="spinner-border spinner-border-sm me-2" role="status"></div>
+                    Loading...
+                </div>
+            </div>
+        </div>
+
+        <!-- Active Deployments -->
+        <div class="card mb-4">
+            <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
+                <h5 class="mb-0">Active Deployments</h5>
+                <button class="btn btn-sm btn-outline-light" onclick="refreshAll()">Refresh</button>
+            </div>
+            <div class="card-body" id="active-deployments">
+                <div class="text-center text-muted py-3">
+                    <div class="spinner-border spinner-border-sm me-2" role="status"></div>
+                    Loading...
+                </div>
+            </div>
+        </div>
+
+        <!-- CodeDeploy Deployments -->
+        <div class="card mb-4">
+            <div class="card-header bg-warning text-dark d-flex justify-content-between align-items-center">
+                <h5 class="mb-0">CodeDeploy Deployments (Worker + Cron / EC2)</h5>
+                <button class="btn btn-sm btn-outline-dark" onclick="loadCodeDeployActive()">Refresh</button>
+            </div>
+            <div class="card-body" id="codedeploy-deployments">
+                <div class="text-center text-muted py-3">
+                    <div class="spinner-border spinner-border-sm me-2" role="status"></div>
+                    Loading...
+                </div>
+            </div>
+        </div>
+
+        <!-- ArgoCD App Status -->
+        <div class="card mb-4">
+            <div class="card-header bg-success text-white">
+                <h5 class="mb-0">ArgoCD Applications</h5>
+            </div>
+            <div class="card-body" id="argocd-apps">
+                <div class="text-center text-muted py-3">
+                    <div class="spinner-border spinner-border-sm me-2" role="status"></div>
+                    Loading...
+                </div>
+            </div>
+        </div>
+
+        <!-- K8s CronJobs (Stage) -->
+        <div class="card mb-4">
+            <div class="card-header bg-info text-white d-flex justify-content-between align-items-center">
+                <h5 class="mb-0">K8s CronJobs</h5>
+                <button class="btn btn-sm btn-outline-light" onclick="loadCronJobs()">Refresh</button>
+            </div>
+            <div class="card-body" id="cronjob-status">
+                <div class="text-center text-muted py-3">
+                    <div class="spinner-border spinner-border-sm me-2" role="status"></div>
+                    Loading...
+                </div>
+            </div>
+        </div>
+
+        <!-- Deployment Detail (shown when clicking a deployment) -->
+        <div class="card mb-4" id="detail-card" style="display: none;">
+            <div class="card-header bg-dark text-white">
+                <h5 class="mb-0">Deployment Detail: <span id="detail-title"></span></h5>
+            </div>
+            <div class="card-body" id="detail-container"></div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+    const ENVIRONMENTS = {{ environments | tojson }};
+    let refreshTimer = null;
+    let countdown = 10;
+
+    document.addEventListener('DOMContentLoaded', function() {
+        refreshAll();
+        startAutoRefresh();
+    });
+
+    function startAutoRefresh() {
+        countdown = 10;
+        if (refreshTimer) clearInterval(refreshTimer);
+        refreshTimer = setInterval(function() {
+            countdown--;
+            document.getElementById('refresh-countdown').textContent = countdown;
+            if (countdown <= 0) {
+                refreshAll();
+                countdown = 10;
+            }
+        }, 1000);
+    }
+
+    function stopAutoRefresh() {
+        if (refreshTimer) {
+            clearInterval(refreshTimer);
+            refreshTimer = null;
+        }
+        document.getElementById('refresh-countdown').textContent = '—';
+    }
+
+    async function authFetch(url) {
+        const resp = await fetch(url);
+        if (resp.status === 401) {
+            stopAutoRefresh();
+            window.location.href = '/login';
+            throw new Error('Session expired');
+        }
+        return resp;
+    }
+
+    async function refreshAll() {
+        countdown = 10;
+        document.getElementById('refresh-countdown').textContent = countdown;
+        await Promise.all([loadBatches(), loadActiveDeployments(), loadCodeDeployActive(), loadArgoApps(), loadCronJobs()]);
+    }
+
+    async function loadBatches() {
+        const container = document.getElementById('batch-deployments');
+        try {
+            const resp = await authFetch('/status/api/batches');
+            const data = await resp.json();
+
+            if (!data.batches || data.batches.length === 0) {
+                container.innerHTML = '<div class="text-muted text-center py-3">No batch deployments yet. Use the Deploy page to trigger an orchestrated deployment.</div>';
+                return;
+            }
+
+            let html = '<div class="table-responsive"><table class="table table-sm table-hover mb-0">';
+            html += '<thead><tr><th>Batch ID</th><th>Environment</th><th>Cluster</th><th>Status</th><th>Services</th><th>Time</th><th>Actions</th></tr></thead><tbody>';
+
+            for (const b of data.batches) {
+                const statusClass = b.status === 'completed' ? 'success'
+                    : b.status === 'partial_failure' ? 'warning' : 'danger';
+                const summary = b.summary || {};
+                const timeStr = b.timestamp ? new Date(b.timestamp).toLocaleString() : 'n/a';
+
+                html += `<tr>
+                    <td><code>${esc(b.batch_id)}</code></td>
+                    <td>${esc(b.environment)}</td>
+                    <td>${esc(b.cluster)}</td>
+                    <td><span class="badge bg-${statusClass}">${esc(b.status)}</span></td>
+                    <td><span class="badge bg-success">${summary.succeeded || 0}</span> / ${summary.total || 0}
+                        ${summary.failed > 0 ? `<span class="badge bg-danger ms-1">${summary.failed} failed</span>` : ''}
+                    </td>
+                    <td><small>${timeStr}</small></td>
+                    <td><button class="btn btn-sm btn-outline-info" onclick="showBatchDetail('${esc(b.batch_id)}')">Details</button></td>
+                </tr>`;
+            }
+            html += '</tbody></table></div>';
+            container.innerHTML = html;
+        } catch (e) {
+            container.innerHTML = `<div class="alert alert-danger">Failed to load: ${esc(e.message)}</div>`;
+        }
+    }
+
+    async function showBatchDetail(batchId) {
+        const card = document.getElementById('detail-card');
+        const container = document.getElementById('detail-container');
+        const title = document.getElementById('detail-title');
+        card.style.display = 'block';
+        title.textContent = 'Batch: ' + batchId;
+        container.innerHTML = '<div class="spinner-border spinner-border-sm"></div> Loading...';
+
+        try {
+            const resp = await authFetch(`/status/api/batch/${batchId}`);
+            const batch = await resp.json();
+
+            if (batch.error) {
+                container.innerHTML = `<div class="alert alert-danger">${esc(batch.error)}</div>`;
+                return;
+            }
+
+            const statusClass = batch.status === 'completed' ? 'success'
+                : batch.status === 'partial_failure' ? 'warning' : 'danger';
+
+            let html = `
+            <div class="mb-3">
+                <span class="badge bg-${statusClass} fs-6">${esc(batch.status)}</span>
+                <span class="ms-2">${esc(batch.environment)}${batch.cluster ? ' on ' + esc(batch.cluster) : ''}</span>
+                <span class="ms-2"><small class="text-muted">by ${esc(batch.user || 'system')}</small></span>
+            </div>
+            ${batch.deploy_order ? `<p class="mb-2"><small>Deploy order: ${batch.deploy_order.join(' → ')}</small></p>` : ''}
+            <h6>Services</h6>
+            <div class="table-responsive">
+            <table class="table table-sm">
+                <thead><tr><th>Service</th><th>Type</th><th>Source</th><th>Status</th></tr></thead>
+                <tbody>`;
+
+            for (const r of (batch.results || [])) {
+                const rClass = r.status === 'completed' ? 'table-success'
+                    : r.status === 'failed' ? 'table-danger' : '';
+                const typeColors = {frontend: 'primary', eks: 'success', worker: 'warning', cron: 'info'};
+                const tc = typeColors[r.deploy_type] || 'secondary';
+                html += `<tr class="${rClass}">
+                    <td><strong>${esc(r.service)}</strong></td>
+                    <td><span class="badge bg-${tc}">${esc(r.deploy_type)}</span></td>
+                    <td>${esc(r.source || 'user')}</td>
+                    <td>${esc(r.status)}</td>
+                </tr>`;
+            }
+            html += '</tbody></table></div>';
+
+            const summary = batch.summary || {};
+            html += `<div class="mt-2"><small class="text-muted">Total: ${summary.total || 0} | Succeeded: ${summary.succeeded || 0} | Failed: ${summary.failed || 0}</small></div>`;
+
+            if (batch.mock) {
+                html += '<small class="text-info mt-1 d-block">[MOCK DATA]</small>';
+            }
+            container.innerHTML = html;
+        } catch (e) {
+            container.innerHTML = `<div class="alert alert-danger">Error: ${esc(e.message)}</div>`;
+        }
+    }
+
+    async function loadActiveDeployments() {
+        const container = document.getElementById('active-deployments');
+        try {
+            const resp = await authFetch('/status/api/active');
+            const data = await resp.json();
+
+            if (data.count === 0) {
+                container.innerHTML = '<div class="text-muted text-center py-3">No active deployments</div>';
+                return;
+            }
+
+            let html = '';
+            for (const dep of data.deployments) {
+                const isCodeDeploy = dep.deployment_type === 'worker' || dep.deployment_type === 'cron' || dep.deployment_id?.startsWith('cd-');
+                const statusClass = dep.status === 'completed' || dep.status === 'Succeeded' ? 'success'
+                    : dep.status === 'failed' || dep.status === 'Failed' ? 'danger' : 'warning';
+                const detailFn = isCodeDeploy ? 'showCodeDeployDetail' : 'showDetail';
+                const typeBadge = dep.deployment_type === 'cron'
+                    ? '<span class="badge bg-info me-2">Cron (CodeDeploy)</span>'
+                    : isCodeDeploy
+                    ? '<span class="badge bg-warning text-dark me-2">Worker (CodeDeploy)</span>'
+                    : '<span class="badge bg-success me-2">ArgoCD</span>';
+
+                html += `
+                <div class="border rounded p-3 mb-2">
+                    <div class="d-flex justify-content-between align-items-center mb-2">
+                        <div>
+                            ${typeBadge}
+                            <strong>${esc(dep.app_name || dep.application_name || 'unknown')}</strong>
+                            <span class="badge bg-${statusClass} status-badge ms-2">${esc(dep.status)}</span>
+                        </div>
+                        <div>
+                            <small class="text-muted">${esc(dep.deployment_id)}</small>
+                            <button class="btn btn-sm btn-outline-primary ms-2" onclick="${detailFn}('${esc(dep.deployment_id)}')">Details</button>
+                        </div>
+                    </div>
+                    <div class="d-flex gap-2 flex-wrap">`;
+
+                if (isCodeDeploy) {
+                    //show lifecycle events for CodeDeploy
+                    for (const evt of (dep.lifecycle_events || [])) {
+                        const evtClass = evt.status === 'completed' ? 'success' : evt.status === 'in_progress' ? 'warning' : 'secondary';
+                        html += `<span class="badge bg-${evtClass} step-item">${esc(evt.event)}</span>`;
+                    }
+                } else {
+                    //show steps for ArgoCD
+                    for (const step of (dep.steps || [])) {
+                        const stepClass = step.status === 'completed' ? 'success' : step.status === 'in_progress' ? 'warning' : 'secondary';
+                        html += `<span class="badge bg-${stepClass} step-item">${esc(step.action)}</span>`;
+                    }
+                }
+                html += `</div>
+                    <small class="text-muted">${isCodeDeploy
+                        ? 'Group: ' + esc(dep.deploy_group || dep.deployment_group || '') + ' | Instances: ' + (dep.instance_count || (dep.instances || []).length)
+                        : 'Tag: ' + esc(dep.image_tag || 'n/a')
+                    } | Started: ${esc(dep.started_at || dep.create_time || '')}</small>
+                </div>`;
+            }
+            container.innerHTML = html;
+        } catch (e) {
+            container.innerHTML = `<div class="alert alert-danger">Failed to load: ${esc(e.message)}</div>`;
+        }
+    }
+
+    async function loadArgoApps() {
+        const container = document.getElementById('argocd-apps');
+        try {
+            const resp = await authFetch('/status/api/argocd-apps');
+            const data = await resp.json();
+
+            let html = '<div class="table-responsive"><table class="table table-sm table-hover mb-0">';
+            html += '<thead><tr><th>Application</th><th>Cluster</th><th>Environment</th><th>Sync</th><th>Health</th><th>Revision</th><th>Last Synced</th><th>Actions</th></tr></thead><tbody>';
+
+            for (const app of data.apps) {
+                const syncClass = app.sync_status === 'Synced' ? 'success' : 'warning';
+                const healthClass = app.health_status === 'Healthy' ? 'success' : app.health_status === 'Progressing' ? 'info' : 'danger';
+                const lastSynced = app.last_synced ? new Date(app.last_synced).toLocaleString() : 'n/a';
+
+                html += `<tr>
+                    <td><strong>${esc(app.app_name)}</strong></td>
+                    <td>${esc(app.cluster)}</td>
+                    <td>${esc(app.environment)}</td>
+                    <td><span class="badge bg-${syncClass}">${esc(app.sync_status)}</span></td>
+                    <td><span class="badge bg-${healthClass}">${esc(app.health_status)}</span></td>
+                    <td><code>${esc(app.revision || '')}</code></td>
+                    <td><small>${lastSynced}</small></td>
+                    <td><button class="btn btn-sm btn-outline-info" onclick="showAppResources('${esc(app.app_name)}', '${esc(app.cluster)}')">Pods</button></td>
+                </tr>`;
+            }
+            html += '</tbody></table></div>';
+            if (data.apps.length === 0) {
+                html = '<div class="text-muted text-center py-3">No ArgoCD applications registered</div>';
+            }
+            if (data.apps.length > 0 && data.apps[0].mock) {
+                html += '<small class="text-info mt-1 d-block">[MOCK DATA]</small>';
+            }
+            container.innerHTML = html;
+        } catch (e) {
+            container.innerHTML = `<div class="alert alert-danger">Failed to load: ${esc(e.message)}</div>`;
+        }
+    }
+
+    async function showDetail(deploymentId) {
+        const card = document.getElementById('detail-card');
+        const container = document.getElementById('detail-container');
+        const title = document.getElementById('detail-title');
+        card.style.display = 'block';
+        title.textContent = deploymentId;
+        container.innerHTML = '<div class="spinner-border spinner-border-sm"></div> Loading...';
+
+        try {
+            const resp = await authFetch(`/status/api/deployment/${deploymentId}`);
+            const dep = await resp.json();
+
+            if (dep.error) {
+                container.innerHTML = `<div class="alert alert-danger">${esc(dep.error)}</div>`;
+                return;
+            }
+
+            const statusClass = dep.status === 'completed' ? 'success' : dep.status === 'failed' ? 'danger' : 'warning';
+            let html = `
+            <div class="mb-3">
+                <span class="badge bg-${statusClass} fs-6">${esc(dep.status)}</span>
+                <span class="ms-2">App: <strong>${esc(dep.app_name)}</strong></span>
+                <span class="ms-2">Tag: <code>${esc(dep.image_tag)}</code></span>
+            </div>
+            <h6>Steps</h6>
+            <ul class="list-group">`;
+
+            for (const step of (dep.steps || [])) {
+                const stepClass = step.status === 'completed' ? 'list-group-item-success' :
+                                  step.status === 'in_progress' ? 'list-group-item-warning' : 'list-group-item-light';
+                html += `<li class="list-group-item ${stepClass} py-2">
+                    <strong>Step ${step.step}:</strong> ${esc(step.action)}
+                    <span class="badge bg-${step.status === 'completed' ? 'success' : step.status === 'in_progress' ? 'warning' : 'secondary'} float-end">${esc(step.status)}</span>
+                </li>`;
+            }
+            html += '</ul>';
+
+            if (dep.completed_at) {
+                html += `<small class="text-muted mt-2 d-block">Completed: ${new Date(dep.completed_at).toLocaleString()}</small>`;
+            }
+            container.innerHTML = html;
+        } catch (e) {
+            container.innerHTML = `<div class="alert alert-danger">Error: ${esc(e.message)}</div>`;
+        }
+    }
+
+    async function showAppResources(appName, cluster) {
+        const card = document.getElementById('detail-card');
+        const container = document.getElementById('detail-container');
+        const title = document.getElementById('detail-title');
+        card.style.display = 'block';
+        title.textContent = appName + ' - Resources' + (cluster ? ' (' + cluster + ')' : '');
+        container.innerHTML = '<div class="spinner-border spinner-border-sm"></div> Loading...';
+
+        try {
+            const resp = await authFetch(`/status/api/argocd/${appName}` + (cluster ? `?cluster=${encodeURIComponent(cluster)}` : ''));
+            const data = await resp.json();
+            const res = data.resources;
+
+            let html = `
+            <div class="mb-3">
+                <span class="badge bg-${data.status.sync_status === 'Synced' ? 'success' : 'warning'}">${esc(data.status.sync_status)}</span>
+                <span class="badge bg-${data.status.health_status === 'Healthy' ? 'success' : 'info'} ms-1">${esc(data.status.health_status)}</span>
+                <span class="ms-2">Revision: <code>${esc(data.status.revision)}</code></span>
+            </div>
+            <h6>Deployment</h6>
+            <p>Replicas: ${res.deployment.ready_replicas}/${res.deployment.replicas} ready | Strategy: ${esc(res.deployment.strategy)}</p>
+            <h6>Pods</h6>
+            <table class="table table-sm">
+                <thead><tr><th>Name</th><th>Status</th><th>Ready</th><th>Restarts</th><th>Age</th></tr></thead>
+                <tbody>`;
+
+            for (const pod of res.pods) {
+                const podClass = pod.status === 'Running' ? '' : 'table-warning';
+                html += `<tr class="pod-row ${podClass}">
+                    <td><code>${esc(pod.name)}</code></td>
+                    <td>${esc(pod.status)}</td>
+                    <td>${esc(pod.ready)}</td>
+                    <td>${pod.restarts}</td>
+                    <td>${esc(pod.age)}</td>
+                </tr>`;
+            }
+            html += '</tbody></table>';
+            if (res.mock) {
+                html += '<small class="text-info">[MOCK DATA]</small>';
+            }
+            container.innerHTML = html;
+        } catch (e) {
+            container.innerHTML = `<div class="alert alert-danger">Error: ${esc(e.message)}</div>`;
+        }
+    }
+
+    async function loadCodeDeployActive() {
+        const container = document.getElementById('codedeploy-deployments');
+        try {
+            const resp = await authFetch('/status/api/codedeploy-active');
+            const data = await resp.json();
+
+            if (data.count === 0) {
+                container.innerHTML = '<div class="text-muted text-center py-3">No active CodeDeploy deployments</div>';
+                return;
+            }
+
+            let html = '<div class="table-responsive"><table class="table table-sm table-hover mb-0">';
+            html += '<thead><tr><th>Deployment ID</th><th>Application</th><th>Group</th><th>Status</th><th>Instances</th><th>Started</th><th>Actions</th></tr></thead><tbody>';
+
+            for (const dep of data.deployments) {
+                const statusClass = dep.status === 'in_progress' || dep.status === 'InProgress' ? 'warning'
+                    : dep.status === 'Succeeded' || dep.status === 'completed' ? 'success' : 'danger';
+                const started = dep.create_time || dep.started_at || '';
+                const startedStr = started ? new Date(started).toLocaleString() : 'n/a';
+
+                html += `<tr>
+                    <td><code>${esc(dep.deployment_id)}</code></td>
+                    <td><strong>${esc(dep.app_name || dep.application_name || '')}</strong></td>
+                    <td>${esc(dep.deploy_group || dep.deployment_group || '')}</td>
+                    <td><span class="badge bg-${statusClass}">${esc(dep.status)}</span></td>
+                    <td>${dep.instance_count || (dep.instances || []).length}</td>
+                    <td><small>${startedStr}</small></td>
+                    <td><button class="btn btn-sm btn-outline-warning" onclick="showCodeDeployDetail('${esc(dep.deployment_id)}')">Details</button></td>
+                </tr>`;
+            }
+            html += '</tbody></table></div>';
+            if (data.deployments.length > 0 && data.deployments[0].mock) {
+                html += '<small class="text-info mt-1 d-block">[MOCK DATA]</small>';
+            }
+            container.innerHTML = html;
+        } catch (e) {
+            container.innerHTML = `<div class="alert alert-danger">Failed to load: ${esc(e.message)}</div>`;
+        }
+    }
+
+    async function showCodeDeployDetail(deploymentId) {
+        const card = document.getElementById('detail-card');
+        const container = document.getElementById('detail-container');
+        const title = document.getElementById('detail-title');
+        card.style.display = 'block';
+        title.textContent = 'CodeDeploy: ' + deploymentId;
+        container.innerHTML = '<div class="spinner-border spinner-border-sm"></div> Loading...';
+
+        try {
+            const resp = await authFetch(`/status/api/codedeploy/${deploymentId}`);
+            const dep = await resp.json();
+
+            if (dep.error) {
+                container.innerHTML = `<div class="alert alert-danger">${esc(dep.error)}</div>`;
+                return;
+            }
+
+            const statusClass = dep.status === 'completed' || dep.status === 'Succeeded' ? 'success'
+                : dep.status === 'failed' || dep.status === 'Failed' ? 'danger' : 'warning';
+
+            let html = `
+            <div class="mb-3">
+                <span class="badge bg-warning text-dark">CodeDeploy</span>
+                <span class="badge bg-${statusClass} ms-1 fs-6">${esc(dep.status)}</span>
+                <span class="ms-2">App: <strong>${esc(dep.app_name || dep.application_name || '')}</strong></span>
+                <span class="ms-2">Group: <strong>${esc(dep.deploy_group || dep.deployment_group || '')}</strong></span>
+            </div>
+
+            <h6>Lifecycle Events</h6>
+            <ul class="list-group mb-3">`;
+
+            for (const evt of (dep.lifecycle_events || [])) {
+                const evtClass = evt.status === 'completed' || evt.status === 'Succeeded' ? 'list-group-item-success'
+                    : evt.status === 'in_progress' || evt.status === 'InProgress' ? 'list-group-item-warning'
+                    : 'list-group-item-light';
+                const badgeClass = evt.status === 'completed' || evt.status === 'Succeeded' ? 'success'
+                    : evt.status === 'in_progress' || evt.status === 'InProgress' ? 'warning' : 'secondary';
+                const duration = evt.duration_ms ? `(${evt.duration_ms}ms)` : '';
+
+                html += `<li class="list-group-item ${evtClass} py-2">
+                    <strong>${esc(evt.event)}</strong> ${duration}
+                    <span class="badge bg-${badgeClass} float-end">${esc(evt.status)}</span>
+                </li>`;
+            }
+            html += '</ul>';
+
+            //show instances
+            const instances = dep.instances || [];
+            if (instances.length > 0) {
+                html += '<h6>Instances</h6>';
+                html += '<table class="table table-sm"><thead><tr><th>Instance ID</th><th>Status</th><th>Current Event</th></tr></thead><tbody>';
+                for (const inst of instances) {
+                    const instClass = inst.status === 'completed' || inst.status === 'Succeeded' ? 'table-success'
+                        : inst.status === 'in_progress' || inst.status === 'InProgress' ? 'table-warning' : '';
+                    html += `<tr class="${instClass}">
+                        <td><code>${esc(inst.instance_id)}</code></td>
+                        <td>${esc(inst.status)}</td>
+                        <td>${esc(inst.current_event || '')}</td>
+                    </tr>`;
+                }
+                html += '</tbody></table>';
+            }
+
+            //revision info
+            const rev = dep.s3_location || dep.revision;
+            if (rev) {
+                html += `<div class="mt-2"><small class="text-muted">Artifact: s3://${esc(rev.bucket || rev.s3_bucket || '')}/${esc(rev.key || rev.s3_key || '')}</small></div>`;
+            }
+
+            if (dep.completed_at || dep.complete_time) {
+                const ct = dep.completed_at || dep.complete_time;
+                html += `<small class="text-muted mt-2 d-block">Completed: ${new Date(ct).toLocaleString()}</small>`;
+            }
+            if (dep.mock) {
+                html += '<small class="text-info mt-1 d-block">[MOCK DATA]</small>';
+            }
+            container.innerHTML = html;
+        } catch (e) {
+            container.innerHTML = `<div class="alert alert-danger">Error: ${esc(e.message)}</div>`;
+        }
+    }
+
+    async function loadCronJobs() {
+        const container = document.getElementById('cronjob-status');
+        if (ENVIRONMENTS.length === 0) {
+            container.innerHTML = '<div class="text-muted text-center py-3">No environments registered</div>';
+            return;
+        }
+        try {
+            const pages = await Promise.all(ENVIRONMENTS.map(env => authFetch(`/status/api/cronjobs/${encodeURIComponent(env)}`).then(r => r.json())));
+            let html = '';
+            let anyMock = false;
+            pages.forEach((data, i) => {
+                const env = ENVIRONMENTS[i];
+                html += `<h6 class="mt-2">${esc(env)}</h6>`;
+                if (data.error) {
+                    html += `<div class="alert alert-warning py-1">${esc(data.error)}</div>`;
+                    return;
+                }
+                if (!data.cronjobs || data.cronjobs.length === 0) {
+                    html += '<div class="text-muted py-2">No K8s CronJobs found</div>';
+                    return;
+                }
+                anyMock = anyMock || !!data.mock;
+                html += '<div class="table-responsive"><table class="table table-sm table-hover mb-0">';
+                html += '<thead><tr><th>CronJob</th><th>Schedule</th><th>Last Run</th><th>Status</th><th>Active</th></tr></thead><tbody>';
+                for (const cj of data.cronjobs) {
+                    const statusClass = cj.status === 'Healthy' || cj.status === 'Active' ? 'success'
+                        : cj.status === 'Progressing' ? 'warning'
+                        : cj.status === 'Degraded' ? 'danger' : 'secondary';
+                    const lastRun = cj.last_schedule ? new Date(cj.last_schedule).toLocaleString() : 'n/a';
+                    html += `<tr>
+                        <td><strong>${esc(cj.name)}</strong><br><small class="text-muted">${esc(cj.namespace)}</small></td>
+                        <td><code>${esc(cj.schedule)}</code></td>
+                        <td><small>${lastRun}</small></td>
+                        <td><span class="badge bg-${statusClass}">${esc(cj.status)}</span></td>
+                        <td>${cj.active_jobs > 0 ? '<span class="badge bg-warning">' + cj.active_jobs + '</span>' : '0'}</td>
+                    </tr>`;
+                }
+                html += '</tbody></table></div>';
+            });
+            if (anyMock) {
+                html += '<small class="text-info mt-1 d-block">[MOCK DATA]</small>';
+            }
+            container.innerHTML = html;
+        } catch (e) {
+            container.innerHTML = `<div class="alert alert-danger">Failed to load: ${esc(e.message)}</div>`;
+        }
+    }
+
+    function esc(text) {
+        if (!text) return '';
+        const div = document.createElement('div');
+        div.appendChild(document.createTextNode(String(text)));
+        return div.innerHTML;
+    }
+    </script>
+</body>
+</html>

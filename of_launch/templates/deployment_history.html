@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='favicon.svg') }}">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>History - OF Launch</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/theme.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/deployment-history.css') }}">
+</head>
+
+<body>
+  <!-- Top Navigation -->
+  <nav class="top-nav">
+    <div class="nav-container">
+      <div class="nav-brand">
+        <h1>🚀 Deploy Portal</h1>
+      </div>
+      <div class="nav-links">
+        <a href="/" class="nav-item">Deploy</a>
+        <a href="/current-state" class="nav-item">Current State</a>
+        <a href="/deployment-history" class="nav-item active">History</a>
+        <div class="user-menu">
+          <span class="username">{{ session.get('username', 'User') }}</span>
+          <span class="role-badge {% if session.get('role') == 'admin' %}role-admin{% elif session.get('role') == 'production-executor' %}role-prod{% else %}role-shared{% endif %}">{{ session.get('role', 'shared-executor') }}</span>
+          <a href="/logout" class="logout-btn">Logout</a>
+        </div>
+      </div>
+    </div>
+  </nav>
+
+  <div class="container">
+    <div class="header">
+      <div class="header-content">
+        <div class="header-text">
+          <h2>📋 Deployment History</h2>
+          <p>Track and monitor all your application deployments</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="filters">
+      <form id="filter-form" method="GET" action="/deployment-history">
+        <input type="hidden" name="page" value="1">
+        <input type="hidden" name="per_page" value="{{ request.args.get('per_page', 10) }}">
+
+        <div class="filter-row">
+          <div class="filter-group">
+            <span class="filter-label">Environment</span>
+            <div class="dropdown-filter">
+              <select class="dropdown-select" name="environment">
+                <option value="">All Environments</option>
+                {% for env in available_environments %}
+                <option value="{{ env }}" {% if request.args.get('environment')==env %}selected{% endif %}>{{ env }}
+                </option>
+                {% endfor %}
+              </select>
+            </div>
+          </div>
+
+          <div class="filter-group">
+            <span class="filter-label">Service</span>
+            <div class="dropdown-filter">
+              <select class="dropdown-select" name="service">
+                <option value="">All Services</option>
+                {% for service in available_services %}
+                <option value="{{ service }}" {% if request.args.get('service')==service %}selected{% endif %}>{{
+                  service }}</option>
+                {% endfor %}
+              </select>
+            </div>
+          </div>
+
+          <div class="filter-group">
+            <span class="filter-label">Deploy Type</span>
+            <div class="dropdown-filter">
+              <select class="dropdown-select" name="deployment_type">
+                <option value="">All Types</option>
+                <option value="frontend" {% if request.args.get('deployment_type')=='frontend' %}selected{% endif %}>Frontend</option>
+                <option value="eks" {% if request.args.get('deployment_type')=='eks' %}selected{% endif %}>EKS</option>
+                <option value="worker" {% if request.args.get('deployment_type')=='worker' %}selected{% endif %}>Worker</option>
+                <option value="cron" {% if request.args.get('deployment_type')=='cron' %}selected{% endif %}>Cron</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="filter-group">
+            <span class="filter-label">Time Range</span>
+            <div class="dropdown-filter">
+              <select class="dropdown-select" name="time_range" id="time-range-select">
+                <option value="">All Time</option>
+                <option value="today" {% if request.args.get('time_range')=='today' %}selected{% endif %}>Today</option>
+                <option value="yesterday" {% if request.args.get('time_range')=='yesterday' %}selected{% endif %}>
+                  Yesterday</option>
+                <option value="last_2_days" {% if request.args.get('time_range')=='last_2_days' %}selected{% endif %}>
+                  Last 2 Days</option>
+                <option value="last_7_days" {% if request.args.get('time_range')=='last_7_days' %}selected{% endif %}>
+                  Last 7 Days</option>
+                <option value="last_1_months" {% if request.args.get('time_range')=='last_1_months' %}selected{% endif
+                  %}>Last 1 Months</option>
+                <option value="custom" {% if request.args.get('time_range')=='custom' %}selected{% endif %}>Custom
+                  Range...</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="filter-actions">
+            <button type="submit" class="btn btn-primary">🔍 Search</button>
+            <a href="/deployment-history" class="btn btn-secondary">🗑️ Clear</a>
+          </div>
+        </div>
+
+        <div class="custom-date-range" id="custom-date-range">
+          <div class="filter-group">
+            <span class="filter-label">From Date</span>
+            <input type="datetime-local" name="start_date" class="date-input"
+              value="{{ request.args.get('start_date', '') }}">
+          </div>
+          <div class="filter-group">
+            <span class="filter-label">To Date</span>
+            <input type="datetime-local" name="end_date" class="date-input"
+              value="{{ request.args.get('end_date', '') }}">
+          </div>
+        </div>
+      </form>
+    </div>
+
+    {% if pagination.total_count > 0 %}
+    <div class="pagination-info">
+      <div class="info-text">
+        Showing {{ pagination.start_record }}-{{ pagination.end_record }} of {{ pagination.total_count }} deployments
+      </div>
+      <div class="per-page-selector">
+        <span class="filter-label">Records per page:</span>
+        <select id="per-page-select">
+          <option value="10" {% if pagination.per_page==10 %}selected{% endif %}>10</option>
+          <option value="20" {% if pagination.per_page==20 %}selected{% endif %}>20</option>
+          <option value="50" {% if pagination.per_page==50 %}selected{% endif %}>50</option>
+          <option value="100" {% if pagination.per_page==100 %}selected{% endif %}>100</option>
+        </select>
+      </div>
+    </div>
+    {% endif %}
+
+    <div class="table-container">
+      <table>
+        <thead>
+          <tr>
+            <th>User</th>
+            <th>Environment</th>
+            <th>Type</th>
+            <th>Service Name</th>
+            <th>Version</th>
+            <th>Status</th>
+            <th>Deploy Time</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% if records %}
+          {% for record in records %}
+          <tr>
+            <td>
+              <div class="user-info">
+                <div class="user-avatar">{{record.user[0]}}</div>
+                <span>{{record.user}}</span>
+              </div>
+            </td>
+            <td><span class="env-tag env-development">{{record.environment}}</span></td>
+            <td><span class="badge-type badge-{{record.deployment_type}}">{{record.deployment_type}}</span></td>
+            <td>{{record.service}}</td>
+            <td>{{record.image_tag}}</td>
+            <td><span class="status-{{record.status}}">{{record.status}}</span></td>
+            <td>{{record.deployment_time}}</td>
+          </tr>
+          {% endfor %}
+          {% else %}
+          <tr>
+            <td colspan="7" class="no-results">
+              📭 No deployment records found matching your search criteria
+            </td>
+          </tr>
+          {% endif %}
+        </tbody>
+      </table>
+    </div>
+
+    {% if pagination.total_pages > 1 %}
+    <div class="pagination">
+      <!-- First Page -->
+      {% if pagination.page > 1 %}
+      <a href="{{ url_for('history.deployment_history', page=1, environment=request.args.get('environment'), service=request.args.get('service'), deployment_type=request.args.get('deployment_type'), time_range=request.args.get('time_range'), start_date=request.args.get('start_date'), end_date=request.args.get('end_date'), per_page=request.args.get('per_page')) }}"
+        class="page-btn">«« First</a>
+      {% endif %}
+
+      <!-- Previous Page -->
+      {% if pagination.has_prev %}
+      <a href="{{ url_for('history.deployment_history', page=pagination.prev_num, environment=request.args.get('environment'), service=request.args.get('service'), deployment_type=request.args.get('deployment_type'), time_range=request.args.get('time_range'), start_date=request.args.get('start_date'), end_date=request.args.get('end_date'), per_page=request.args.get('per_page')) }}"
+        class="page-btn">‹ Prev</a>
+      {% else %}
+      <span class="page-btn disabled">‹ Prev</span>
+      {% endif %}
+
+      <!-- Page Numbers -->
+      {% for page_num in pagination.page_range %}
+      {% if page_num == pagination.page %}
+      <span class="current">{{ page_num }}</span>
+      {% else %}
+      <a
+        href="{{ url_for('history.deployment_history', page=page_num, environment=request.args.get('environment'), service=request.args.get('service'), deployment_type=request.args.get('deployment_type'), time_range=request.args.get('time_range'), start_date=request.args.get('start_date'), end_date=request.args.get('end_date'), per_page=request.args.get('per_page')) }}">{{
+        page_num }}</a>
+      {% endif %}
+      {% endfor %}
+
+      <!-- Next Page -->
+      {% if pagination.has_next %}
+      <a href="{{ url_for('history.deployment_history', page=pagination.next_num, environment=request.args.get('environment'), service=request.args.get('service'), deployment_type=request.args.get('deployment_type'), time_range=request.args.get('time_range'), start_date=request.args.get('start_date'), end_date=request.args.get('end_date'), per_page=request.args.get('per_page')) }}"
+        class="page-btn">Next ›</a>
+      {% else %}
+      <span class="page-btn disabled">Next ›</span>
+      {% endif %}
+
+      <!-- Last Page -->
+      {% if pagination.page < pagination.total_pages %} <a
+        href="{{ url_for('history.deployment_history', page=pagination.total_pages, environment=request.args.get('environment'), service=request.args.get('service'), deployment_type=request.args.get('deployment_type'), time_range=request.args.get('time_range'), start_date=request.args.get('start_date'), end_date=request.args.get('end_date'), per_page=request.args.get('per_page')) }}"
+        class="page-btn">Last »»</a>
+        {% endif %}
+    </div>
+    {% endif %}
+
+    <!-- External JavaScript file -->
+    <script src="{{ url_for('static', filename='js/deployment_history.js') }}"></script>
+</body>
+
+</html>

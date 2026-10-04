@@ -163,3 +163,10 @@ Thumbs.db
 #------------------------------------------------------------------------------
 #all markdown uncommitted — negate per-repo with !README.md if truly needed
 *.md
+
+!README.md
+.env
+__pycache__/
+*.pyc
+!.env.example
+!.codedeploy/scripts/validate_service.sh
